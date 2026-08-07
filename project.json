@@ -1,0 +1,27 @@
+{
+	"audio" : true,
+	"contentrating" : "Mature",
+	"description" : "Sakura Beauty Collage v3 — 35 photos, cherry blossom particles & wind effects, 7 built-in songs with lyrics. 动态樱花特效壁纸.",
+	"file" : "index.html",
+	"general" : 
+	{
+		"properties" : 
+		{
+			"schemecolor" : 
+			{
+				"order" : 0,
+				"text" : "ui_browse_properties_scheme_color",
+				"type" : "color",
+				"value" : "0.9176470588235294 0.396078431372549 0.9176470588235294"
+			}
+		}
+	},
+	"preview" : "preview.jpg",
+	"ratingsex" : "full",
+	"ratingviolence" : "none",
+	"tags" : [ "Girls" ],
+	"title" : "Sakura Beauty Collage v3",
+	"type" : "web",
+	"version" : 5,
+	"visibility" : "public"
+}

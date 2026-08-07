@@ -1,0 +1,682 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #ffffff;
+}
+
+#wallpaper {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    background: #000;
+}
+
+/* ---------- Background crossfade layers ---------- */
+
+#bg-container {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background: #000;
+    overflow: hidden;
+}
+
+#bg-container img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: opacity 3s ease;
+}
+
+#bg-container img.active {
+    opacity: 1;
+}
+
+#bg-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 1;
+    pointer-events: none;
+}
+
+/* ---------- Photo Wall ---------- */
+
+#photo-wall {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+}
+
+.photo-wrapper {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    z-index: var(--z, 5);
+}
+
+.photo-card {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 4px solid #1a1a1a;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5),
+                0 2px 8px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transition: opacity 3s ease, box-shadow 0.4s ease;
+    transform: rotate(var(--rot, 0deg));
+    animation: float var(--float-dur, 5s) ease-in-out infinite;
+    animation-delay: var(--float-delay, 0s);
+    will-change: transform;
+    position: relative;
+    /* No fixed size — card shrink-wraps the image */
+}
+
+.photo-card.main-card {
+    border: 6px solid #1a1a1a;
+    border-radius: 20px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6),
+                0 8px 24px rgba(0, 0, 0, 0.3);
+    transform: rotate(0deg);
+    animation: none;
+}
+
+.photo-card.main-card img {
+    max-width: 90vw;
+    max-height: 85vh;
+    animation: kenburns 25s ease-in-out infinite alternate;
+}
+
+.photo-card.visible {
+    opacity: 1;
+}
+
+.photo-card img {
+    display: block;
+    max-width: 35vw;
+    max-height: 55vh;
+    width: auto;
+    height: auto;
+    animation: kenburns 20s ease-in-out infinite alternate;
+    animation-delay: var(--kb-delay, 0s);
+}
+
+/* Subtle glow behind card on dark bg */
+.photo-card::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(255, 182, 193, 0.15), rgba(200, 160, 220, 0.1));
+    z-index: -1;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+.photo-card.visible::before {
+    opacity: 0.3;
+    animation: glow-pulse 4s ease-in-out infinite;
+    animation-delay: var(--float-delay, 0s);
+}
+
+.photo-card.main-card::before {
+    inset: -4px;
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(255, 182, 193, 0.2), rgba(200, 160, 220, 0.15));
+}
+
+.photo-card.main-card.visible::before {
+    opacity: 0.4;
+}
+
+/* ---------- Animations ---------- */
+
+@keyframes float {
+    0%, 100% {
+        transform: rotate(var(--rot, 0deg)) translateY(0px);
+    }
+    50% {
+        transform: rotate(var(--rot, 0deg)) translateY(-14px);
+    }
+}
+
+@keyframes kenburns {
+    0% {
+        transform: scale(1) translate(0, 0);
+    }
+    100% {
+        transform: scale(1.15) translate(-2%, -3%);
+    }
+}
+
+@keyframes glow-pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.6; }
+}
+
+/* ---------- Vignette ---------- */
+
+.vignette {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.4) 100%);
+    z-index: 50;
+}
+
+/* ---------- Author Watermark ---------- */
+
+#author-watermark {
+    position: absolute;
+    bottom: 6%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 55;
+    font-family: 'STKaiti', 'KaiTi', 'Microsoft YaHei', serif;
+    font-size: 42px;
+    font-weight: 300;
+    letter-spacing: 12px;
+    text-indent: 12px;
+    color: rgba(255, 255, 255, 0.35);
+    text-shadow:
+        0 0 30px rgba(255, 182, 193, 0.4),
+        0 0 60px rgba(255, 182, 193, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    white-space: nowrap;
+    opacity: 0;
+    animation: watermark-fade-in 3s ease 2s forwards,
+               watermark-breathe 8s ease-in-out 5s infinite;
+}
+
+@keyframes watermark-fade-in {
+    0% {
+        opacity: 0;
+        letter-spacing: 30px;
+        filter: blur(8px);
+    }
+    100% {
+        opacity: 1;
+        letter-spacing: 12px;
+        filter: blur(0);
+    }
+}
+
+@keyframes watermark-breathe {
+    0%, 100% {
+        color: rgba(255, 255, 255, 0.3);
+        text-shadow:
+            0 0 30px rgba(255, 182, 193, 0.4),
+            0 0 60px rgba(255, 182, 193, 0.2),
+            0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+    50% {
+        color: rgba(255, 220, 230, 0.45);
+        text-shadow:
+            0 0 40px rgba(255, 182, 193, 0.55),
+            0 0 80px rgba(255, 182, 193, 0.3),
+            0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+}
+
+/* ---------- Lyrics Display ---------- */
+
+#lyrics-display {
+    position: absolute;
+    bottom: 15%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80%;
+    max-width: 700px;
+    height: 200px;
+    z-index: 54;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.6s ease;
+    mask-image: linear-gradient(to bottom, transparent, black 25%, black 75%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 25%, black 75%, transparent);
+}
+
+#lyrics-display.visible {
+    opacity: 1;
+}
+
+#lyrics-scroll {
+    padding: 100px 0;
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+}
+
+.lyric-line {
+    text-align: center;
+    font-size: 18px;
+    line-height: 48px;
+    height: 48px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    color: rgba(255, 255, 255, 0.22);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.5s ease, font-size 0.5s ease, text-shadow 0.5s ease;
+}
+
+.lyric-line.near {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.lyric-line.active {
+    color: rgba(255, 248, 252, 1);
+    font-size: 22px;
+    font-weight: 500;
+    text-shadow:
+        0 0 8px  rgba(255, 170, 195, 0.60),
+        0 0 20px rgba(255, 150, 180, 0.30),
+        0 0 40px rgba(255, 130, 165, 0.12);
+}
+
+/* ---------- Lyrics Toast ---------- */
+
+#lyrics-toast {
+    position: absolute;
+    bottom: 28%;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 60;
+    padding: 8px 22px;
+    border-radius: 20px;
+    background: rgba(20, 10, 25, 0.7);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 182, 193, 0.3);
+    color: rgba(255, 220, 230, 0.95);
+    font-size: 13px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    white-space: nowrap;
+}
+
+#lyrics-toast.show {
+    opacity: 1;
+}
+
+/* ---------- Music Controller ---------- */
+
+#music-controller {
+    position: absolute;
+    top: 24px;
+    right: 28px;
+    z-index: 80;
+    border-radius: 22px;
+    background: rgba(20, 10, 25, 0.5);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 182, 193, 0.25);
+    opacity: 0;
+    animation: mc-appear 1.5s ease 1s forwards;
+    overflow: hidden;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    min-width: 250px;
+}
+
+#mc-bar {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 7px 10px 7px 8px;
+}
+
+.mc-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: rgba(255, 182, 193, 0.8);
+    cursor: pointer;
+    transition: background 0.25s ease, color 0.25s ease, transform 0.15s ease;
+    flex-shrink: 0;
+}
+
+.mc-btn:hover {
+    background: rgba(255, 182, 193, 0.15);
+    color: rgba(255, 220, 230, 1);
+    transform: scale(1.12);
+}
+
+.mc-btn:active {
+    transform: scale(0.92);
+}
+
+.mc-play {
+    background: rgba(255, 182, 193, 0.12);
+}
+
+.mc-play.playing {
+    background: rgba(255, 182, 193, 0.2);
+    color: rgba(255, 220, 230, 0.95);
+    animation: mc-pulse 3s ease-in-out infinite;
+}
+
+#mc-title {
+    font-size: 13px;
+    color: rgba(255, 220, 230, 0.85);
+    font-family: 'Microsoft YaHei', sans-serif;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: none;
+    padding: 0 2px;
+}
+
+/* ---- Volume & Playlist toggle buttons ---- */
+#mc-vol-toggle.active,
+#mc-playlist-toggle.active {
+    background: rgba(255, 182, 193, 0.2);
+    color: rgba(255, 220, 230, 1);
+}
+
+/* ---- Progress bar ---- */
+#mc-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px 8px;
+}
+
+.mc-time {
+    font-size: 11px;
+    color: rgba(255, 220, 230, 0.6);
+    font-family: 'Microsoft YaHei', monospace;
+    user-select: none;
+    min-width: 32px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+#mc-seek-bar {
+    flex: 1;
+    height: 4px;
+    background: rgba(255, 182, 193, 0.15);
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+    transition: height 0.2s ease;
+}
+
+#mc-seek-bar:hover {
+    height: 6px;
+}
+
+#mc-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(255, 182, 193, 0.6), rgba(255, 210, 220, 0.8));
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.1s linear;
+}
+
+#mc-progress-handle {
+    position: absolute;
+    top: 50%;
+    left: 0%;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 230, 235, 0.95);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    transform: translate(-50%, -50%) scale(0);
+    transition: transform 0.2s ease;
+    pointer-events: none;
+}
+
+#mc-seek-bar:hover #mc-progress-handle {
+    transform: translate(-50%, -50%) scale(1);
+}
+
+/* ---- Volume panel ---- */
+#mc-volume-panel {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.35s ease, padding 0.35s ease;
+    padding: 0 14px;
+}
+
+#music-controller.vol-expanded #mc-volume-panel {
+    max-height: 26px;
+    padding: 8px 14px;
+    overflow: visible;
+}
+
+#mc-vol-slider {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 182, 193, 0.15);
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+    transition: height 0.2s ease;
+}
+
+#mc-vol-slider:hover {
+    height: 6px;
+}
+
+#mc-vol-fill {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(255, 182, 193, 0.6), rgba(255, 210, 220, 0.8));
+    border-radius: 2px;
+    width: 50%;
+    transition: width 0.1s linear;
+}
+
+#mc-vol-handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 230, 235, 0.95);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    transform: translate(-50%, -50%) scale(1);
+    transition: left 0.15s ease;
+    pointer-events: none;
+    z-index: 2;
+}
+
+/* ---- Playlist panel ---- */
+#mc-playlist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#music-controller.expanded,
+#music-controller.vol-expanded {
+    border-color: rgba(255, 182, 193, 0.4);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+#music-controller.expanded #mc-playlist {
+    max-height: 280px;
+    overflow-y: auto;
+    border-top: 1px solid rgba(255, 182, 193, 0.15);
+}
+
+/* ---- Add local music / lyrics buttons ---- */
+#mc-add-local {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+}
+
+#music-controller.expanded #mc-add-local {
+    max-height: 50px;
+    border-top: 1px solid rgba(255, 182, 193, 0.12);
+}
+
+#mc-add-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 9px 16px;
+    border: none;
+    background: transparent;
+    color: rgba(255, 182, 193, 0.7);
+    font-size: 13px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+    user-select: none;
+}
+
+#mc-add-btn:hover {
+    background: rgba(255, 182, 193, 0.1);
+    color: rgba(255, 220, 230, 1);
+}
+
+#mc-add-btn:active {
+    background: rgba(255, 182, 193, 0.15);
+}
+
+.mc-pl-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px;
+    font-size: 13px;
+    font-family: 'Microsoft YaHei', sans-serif;
+    color: rgba(255, 220, 230, 0.7);
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+    user-select: none;
+}
+
+.mc-pl-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mc-pl-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(255, 182, 193, 0.2);
+    color: rgba(255, 220, 230, 0.8);
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.mc-pl-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: rgba(255, 220, 230, 0.4);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.2s ease, color 0.2s ease;
+    opacity: 0;
+}
+
+.mc-pl-item:hover .mc-pl-remove {
+    opacity: 1;
+}
+
+.mc-pl-remove:hover {
+    background: rgba(255, 100, 100, 0.2);
+    color: rgba(255, 150, 150, 1);
+}
+
+.mc-pl-item:hover {
+    background: rgba(255, 182, 193, 0.1);
+    color: rgba(255, 220, 230, 0.95);
+}
+
+.mc-pl-item.active {
+    background: rgba(255, 182, 193, 0.15);
+    color: rgba(255, 220, 230, 1);
+    font-weight: 600;
+}
+
+.mc-pl-indicator {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.mc-pl-item.active .mc-pl-indicator::before {
+    content: '';
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 4px 0 4px 7px;
+    border-color: transparent transparent transparent rgba(255, 182, 193, 0.9);
+}
+
+/* Custom scrollbar for playlist */
+#mc-playlist::-webkit-scrollbar {
+    width: 4px;
+}
+#mc-playlist::-webkit-scrollbar-track {
+    background: transparent;
+}
+#mc-playlist::-webkit-scrollbar-thumb {
+    background: rgba(255, 182, 193, 0.25);
+    border-radius: 2px;
+}
+
+@keyframes mc-appear {
+    0% { opacity: 0; transform: scale(0.7) translateY(-10px); }
+    100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes mc-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 182, 193, 0.3); }
+    50% { box-shadow: 0 0 0 6px rgba(255, 182, 193, 0); }
+}
+
+/* ---------- Sakura Canvas ---------- */
+
+#sakura-canvas {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 100;
+}

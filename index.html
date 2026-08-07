@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sakura Beauty Collage</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ DOM STRUCTURE (style.css / layout.js / sakura.js depend on these IDs) ============ -->
+<div id="wallpaper">
+    <div id="bg-container"></div>
+    <div id="bg-overlay"></div>
+    <div id="photo-wall"></div>
+
+    <!-- Author watermark -->
+    <div id="author-watermark">清野兰奈</div>
+
+    <!-- Lyrics display (2-line scroll) -->
+    <div id="lyrics-display">
+        <div id="lyrics-scroll"></div>
+    </div>
+    <div id="lyrics-toast">暂无歌词</div>
+
+    <!-- Music controller panel -->
+    <div id="music-controller">
+        <!-- Top bar: prev | play | next | title | vol | playlist -->
+        <div id="mc-bar">
+            <button class="mc-btn" id="mc-prev" title="上一首">&#9664;</button>
+            <button class="mc-btn mc-play" id="mc-play" title="播放/暂停">&#9654;</button>
+            <button class="mc-btn" id="mc-next" title="下一首">&#9654;</button>
+            <span id="mc-title">未加载</span>
+            <button class="mc-btn" id="mc-vol-toggle" title="音量">&#9834;</button>
+            <button class="mc-btn" id="mc-playlist-toggle" title="播放列表">&#9776;</button>
+        </div>
+
+        <!-- Progress bar -->
+        <div id="mc-progress">
+            <span class="mc-time" id="mc-current">0:00</span>
+            <div id="mc-seek-bar">
+                <div id="mc-progress-fill"></div>
+                <div id="mc-progress-handle"></div>
+            </div>
+            <span class="mc-time" id="mc-total">0:00</span>
+        </div>
+
+        <!-- Volume slider panel -->
+        <div id="mc-volume-panel">
+            <div id="mc-vol-slider">
+                <div id="mc-vol-fill"></div>
+                <div id="mc-vol-handle"></div>
+            </div>
+        </div>
+
+        <!-- Playlist -->
+        <ul id="mc-playlist"></ul>
+
+        <!-- Add local music -->
+        <div id="mc-add-local">
+            <button id="mc-add-btn">+ 添加本地音乐</button>
+            <input type="file" id="mc-file-input" accept="audio/*,.lrc" multiple hidden>
+        </div>
+    </div>
+
+    <!-- Sakura canvas -->
+    <canvas id="sakura-canvas"></canvas>
+
+    <!-- Vignette overlay -->
+    <div class="vignette"></div>
+</div>
+
+<!-- ============ AUDIO ELEMENT (hidden, no src, no autoplay, no loop) ============ -->
+<audio id="bgm" preload="auto"></audio>
+
+<!-- ============ EXTERNAL SCRIPTS (load first so they can find their DOM elements) ============ -->
+<script src="sakura.js"></script>
+<script src="layout.js"></script>
+
+<!-- ============ MUSIC ENGINE — COMPLETELY FROM SCRATCH ============ -->
+<script>
+(function () {
+    'use strict';
+
+    // ---- DOM refs ----
+    var audio = document.getElementById('bgm');
+    var playBtn = document.getElementById('mc-play');
+    var prevBtn = document.getElementById('mc-prev');
+    var nextBtn = document.getElementById('mc-next');
+    var titleEl = document.getElementById('mc-title');
+    var currentTimeEl = document.getElementById('mc-current');
+    var totalTimeEl = document.getElementById('mc-total');
+    var progressFill = document.getElementById('mc-progress-fill');
+    var progressHandle = document.getElementById('mc-progress-handle');
+    var seekBar = document.getElementById('mc-seek-bar');
+    var volTrack = document.getElementById('mc-vol-slider');
+    var volFill = document.getElementById('mc-vol-fill');
+    var volHandle = document.getElementById('mc-vol-handle');
+    var volToggle = document.getElementById('mc-vol-toggle');
+    var playlistToggle = document.getElementById('mc-playlist-toggle');
+    var playlistEl = document.getElementById('mc-playlist');
+    var mcPanel = document.getElementById('music-controller');
+    var addBtn = document.getElementById('mc-add-btn');
+    var fileInput = document.getElementById('mc-file-input');
+    var lyricsScroll = document.getElementById('lyrics-scroll');
+    var lyricsDisplay = document.getElementById('lyrics-display');
+    var lyricsToast = document.getElementById('lyrics-toast');
+
+    var TARGET_VOLUME = 0.5;
+    audio.volume = TARGET_VOLUME;
+
+    // ---- Track definitions ----
+    var BUILTIN_TRACKS = [
+        { file: 'bgm.mp3', name: '水果篮子', artist: '冈崎律子' },
+        { file: 'bgm2.mp3', name: '你最珍贵', artist: '七公主' },
+        { file: 'bgm3.mp3', name: 'Pretty Boy', artist: 'M2M' },
+        { file: 'bgm4.mp3', name: 'The Day You Went Away', artist: 'M2M' },
+        { file: 'bgm5.mp3', name: 'Time after time', artist: '仓木麻衣' },
+        { file: 'bgm6.mp3', name: 'ありがとう', artist: 'KOKIA' },
+        { file: 'bgm7.mp3', name: 'Only One', artist: 'BoA' }
+    ];
+
+    var playlist = [];       // full file paths
+    var trackNames = [];     // display names
+    var currentTrack = 0;
+
+    // ---- Lyrics state ----
+    var lyricsMap = {};          // filename base → [{time, text}, ...]
+    var currentLyrics = null;    // lyrics for current track
+    var currentLyricIndex = -1;
+    var LYRIC_LINE_HEIGHT = 48;
+
+    // ---- Built-in LRC lyrics (synced with actual audio) ----
+    var BUILTIN_LRC = {
+        'bgm': '[ti:水果篮子]\n[ar:冈崎律子]\n[00:14.80]我真的是非常的快乐\n[00:17.90]每次当你面对我微笑着\n[00:21.70]你那灿烂的笑容能融化一切\n[00:28.10]虽然距离春天还很远\n[00:31.70]种子还在冰冷的土里面\n[00:35.70]仍然等待着萌芽的那一瞬间\n[00:41.10]就算是今天还留有一个不开心的我\n[00:44.70]就算是昨天的心中的伤痕还残留着\n[00:49.20]我还是相信你将会敞开心扉露出笑容\n[00:55.10]虽然昨天的往事已经无法重新来过\n[00:58.40]但是今天的我却已经因为你而改变\n[01:03.30]Let\'s stay together 永远的\n[01:23.90]让你微笑只在我面前\n[01:27.70]还有你那触碰我的指尖\n[01:31.30]你的美好理想和无境的心愿\n[01:37.80]只是想过得优雅一些\n[01:41.40]这样我们也就不再后悔\n[01:45.70]让你我一同跨越叹息的海洋\n[01:50.70]就算是今天痛苦仍然还充斥着你我\n[01:54.20]总有一天它会成为回忆温馨的诉说\n[01:57.90]其实只需要我们的心同时被感动融化\n[02:04.80]我已经明白生存在这的意义和作用\n[02:08.00]也已经了解诞生于世的含义和快乐\n[02:12.70]Let\'s stay together 永远的\n[02:20.10]吧吧吧\n[02:52.80]就算是今天痛苦仍然还充斥着你我\n[02:56.90]总有一天它会成为回忆温馨的诉说\n[03:00.70]其实只需要我们的心同时被感动融化\n[03:07.10]我已经明白生存在这的意义和作用\n[03:10.80]也已经了解诞生于世的含义和快乐\n[03:15.30]Let\'s stay together 永远的',
+        'bgm3': '[ti:Pretty Boy]\n[ar:M2M]\n[00:25.53]I lie awake at night\n[00:30.84]See things in black and white\n[00:36.43]I\'ve only got you inside my mind\n[00:41.79]You know you have made me blind\n[00:47.44]I lie awake and pray\n[00:52.84]That you will look my way\n[00:58.36]I have all this longing in my heart\n[01:03.90]I knew it right from the start\n[01:11.20]Oh my pretty pretty boy I love you\n[01:16.25]Like I never ever loved no one before you\n[01:23.47]Pretty pretty boy of mine\n[01:27.26]Just tell me you love me too\n[01:33.21]Oh my pretty pretty boy I need you\n[01:38.31]Oh my pretty pretty boy I do\n[01:44.14]Let me inside\n[01:46.94]Make me stay right beside you\n[02:01.89]I used to write your name\n[02:07.30]And put it in a frame\n[02:12.77]And sometime I think I hear you call\n[02:18.66]Right from my bedroom wall\n[02:23.52]You stay a little while\n[02:29.29]And touch me with your smile\n[02:34.94]And what can I say to make you mine\n[02:40.34]To reach out for you in time\n[02:44.84]Oh my pretty pretty boy I love you\n[02:49.94]Like I never ever loved no one before you\n[02:57.17]Pretty pretty boy of mine\n[03:00.95]Just tell me you love me too\n[03:04.11]Tell me you love me too\n[03:06.90]Oh my pretty pretty boy I need you\n[03:12.03]Oh my pretty pretty boy I do\n[03:17.86]Let me inside\n[03:20.60]Make me stay right beside you\n[03:40.49]Oh pretty boy pretty boy pretty boy\n[03:46.81]Say you love me too\n[03:51.01]Oh my pretty pretty boy I love you\n[03:56.24]Like I never ever loved no one before you\n[04:03.53]Pretty pretty boy of mine\n[04:07.30]Just tell me you love me too\n[04:10.40]Tell me you love me too\n[04:13.12]Oh my pretty pretty boy I need you\n[04:18.35]Oh my pretty pretty boy I do\n[04:24.12]Let me inside\n[04:26.98]Make me stay right beside you',
+        'bgm4': '[ti:The Day You Went Away]\n[ar:M2M]\n[al:Shades of Purple]\n[00:12.21]Oh-oh\n[00:16.14]Mmm\n[00:19.29]Well, I wonder, could it be\n[00:25.01]When I was dreaming \'bout you baby, you were dreaming of me\n[00:29.59]Call me crazy\n[00:31.88]Call me blind\n[00:35.25]To still be suffering is stupid after all of this time\n[00:40.05]Did I lose my love to someone better\n[00:43.69]And does she love you like I do, I do\n[00:47.55]You know I really, really do\n[00:50.41]Well, hey, so much I need to say\n[00:54.70]Been lonely since the day\n[00:57.36]The day you went away\n[01:00.33]So sad but true, for me there\'s only you\n[01:05.23]Been crying since the day\n[01:07.44]The day you went away\n[01:12.89]Oh-oh\n[01:16.14]Yeah\n[01:17.98]Oh-oh-oh\n[01:20.75]I remember date and time\n[01:25.64]September 22nd, Sunday, 25 after nine\n[01:30.49]In the doorway with your case\n[01:35.80]No longer shouting at each other, there were tears on our faces\n[01:41.36]And we were letting go of something special\n[01:45.25]Something we\'ll never have again\n[01:47.81]I know, I guess I really, really know\n[01:52.03]Well hey, so much I need to say\n[01:55.57]Been lonely since the day\n[01:58.25]The day you went away\n[02:01.55]So sad but true for me there\'s only you\n[02:06.01]Been crying since the day\n[02:08.77]The day you went away\n[02:11.30]The day you went away\n[02:13.59]The day you went away\n[02:19.36]Oh, no\n[02:22.09]Yeah\n[02:25.27]Oh-oh-oh-oh\n[02:27.43]Did I lose my love to someone better\n[02:30.72]And does she love you like I do, I do\n[02:34.98]You know I really, really do\n[02:37.97]Well hey, so much I need to say\n[02:41.54]Been lonely since the day\n[02:44.27]The day you went away\n[02:47.41]So sad but true for me, there\'s only you\n[02:51.76]Been crying since the day\n[02:54.39]The day you went away\n[02:57.66]Why do we never know what we\'ve got \'til it\'s gone?\n[03:01.96]How could I carry on?\n[03:05.00]The day you went away',
+        'bgm5': '[ti:Time after time~花舞う街で~]\n[ar:倉木麻衣]\n[00:11.15]もしも君に巡り逢えたら\n[00:16.02]二度と君の手を離さない\n[00:21.34]春の終わり告げる 花御堂\n[00:26.42]霞む花 一枚\n[00:31.28]蘇る 思い出の歌\n[00:36.72]この胸に 今も優しく\n[00:43.76]Time after time\n[00:45.42]君と出逢った奇跡\n[00:49.03]緩やかな風吹く街で\n[00:54.22]そっと手を繋ぎ 歩いた坂道\n[00:59.97]今も忘れない約束\n[01:20.77]風に君の声が聞こえる\n[01:25.81]薄氷冴返る 遠い記憶\n[01:30.96]傷付く怖さを知らず 誓った\n[01:36.14]いつかまたこの場所で\n[01:40.91]巡り逢おう 薄紅色の\n[01:46.40]季節が来る日に 笑顔で\n[01:53.52]Time after time\n[01:55.04]ひとり 花舞う街で\n[01:58.71]散らざるときは戻らないけれど\n[02:03.90]あの日と同じ 変わらない景色に\n[02:09.65]涙ひらり 待っていたよ\n[02:20.38]風舞う花びらが\n[02:25.54]水面を撫でるように\n[02:30.81]大切に想うほど 切なく\n[02:43.33]人は皆孤独と言うけれど\n[02:48.42]探さずにはいられない 誰かを\n[02:53.61]儚く壊れやすいものばかり\n[02:58.65]追い求めてしまう\n[03:04.83]Time after time\n[03:07.30]君と色づく街で\n[03:10.93]出逢えたら もう約束はいらない\n[03:16.09]誰よりもずっと 傷付きやすい君の\n[03:21.85]そばにいたい今度は きっと'
+,
+                        'bgm6': '[ti:ありがとう]\n[ar:KOKIA]\n[00:13.39]不经意间\n[00:17.95]仿佛失去了什么\n[00:21.89]在不知不觉之间\n[00:29.36]忽然惊觉\n[00:32.29]你已经不在身边\n[00:35.83]只留给我一段回忆\n[00:42.23]在忙碌的时光里\n[00:50.35]像丢了语言的木偶\n[00:56.89]像被遗弃在街角的\n[01:00.64]流浪猫一样\n[01:03.77]听见无声的呐喊\n[01:10.36]如果\n[01:14.17]能够再一次见到你\n[01:17.76]我只想告诉你一句话\n[01:24.52]谢谢 谢谢你\n[01:37.90]就算有时候\n[01:42.38]我们彼此伤害\n[01:46.78]也想要感受你的存在\n[01:52.88]回忆是唯一的\n[01:57.37]安慰\n[02:00.50]因你一直在这里\n[02:06.50]如果\n[02:08.62]能够再一次见到你\n[02:14.23]我只想告诉你一句话\n[02:21.20]谢谢\n[02:28.04]谢谢你\n[02:53.21]如果能够再一次见到你\n[03:04.20]我只想告诉你一句话\n[03:10.97]如果能够再一次见到你\n[03:18.02]我只想告诉你一句话\n[03:24.64]谢谢\n[03:31.68]谢谢你\n[03:40.53]就算有时候\n[03:44.00]我们彼此伤害\n[03:48.60]也想要感受你的存在',
+        'bgm7': '[ti:Only One]\n[ar:BoA]\n[00:10.45]渐渐远去的你\n[00:12.69]You\'re the only one\n[00:15.71]我因为爱过你\n[00:18.04]You\'re the only one\n[00:21.02]即使很痛很痛 即使像个傻瓜\n[00:23.95]Good bye\n[00:26.35]即使说过不再见面\n[00:28.65]You\'re the only one\n[00:30.61]你是唯一的\n[00:33.08]尴尬地对坐着\n[00:37.11]轻声问候些琐碎之事\n[00:43.38]偶尔没话题的瞬间\n[00:47.72]凝结了冰冷寂静的我们\n[00:53.12]现在我们坐在这里却已变成陌生人\n[00:58.58]虽然有人会流着泪留下\n[01:03.92]为了不伤害我你费尽心思\n[01:09.14]讨厌你这样看眼色\n[01:11.91]So I\'ll let you go\n[01:14.68]我的爱 现在再见了\n[01:18.50]You\'re the only one\n[01:21.00]即使在离别的瞬间\n[01:24.00]You\'re the only one\n[01:27.00]即使很痛很痛 即使像个傻瓜\n[01:30.00]Good bye\n[01:32.50]即使说过不再见面\n[01:35.50]You\'re the only one\n[01:38.00]你是唯一的\n[01:40.00]You\'re the only one, Only One\n[01:45.00]对我突如其来的话\n[01:49.00]不知为何你好像很安心\n[01:54.00]从何时起我们变成了这样\n[01:59.00]从很久以前就只期盼别处了吧\n[02:05.00]天差地别的开始和结束那般尖锐\n[02:10.00]刺穿我心脏的痛楚为何一样\n[02:15.00]澎湃的心一瞬间空虚地崩溃\n[02:20.00]这样的我要怎么站起来\n[02:24.00]我的爱 现在再见了\n[02:28.00]You\'re the only one, Only One\n[02:31.00]即使在离别的瞬间\n[02:34.00]You\'re the only one\n[02:37.00]即使很痛很痛 即使像个傻瓜\n[02:40.00]Good bye Good bye\n[02:42.50]即使说过不再见面\n[02:45.50]You\'re the only one\n[02:48.00]You\'re the only one\n[02:51.00]何时才能将你从脑中抹去\n[02:56.00]I will let you go\n[02:59.00]一天两天一个月\n[03:02.00]也许是好几年\n[03:05.00]My baby can\'t forget\n[03:08.00]而在某一天你的记忆里\n[03:11.00]不再有我这个人 会把我忘了吧\n[03:19.00]Only One\n[03:23.00]You\'re the only one, Only One',
+    };
+
+    // Pre-parse built-in LRC at page load (synchronous, no fetch)
+    (function () {
+        for (var key in BUILTIN_LRC) {
+            var parsed = parseLrc(BUILTIN_LRC[key]);
+            if (parsed.length > 0) lyricsMap[key] = parsed;
+        }
+    })();
+
+    function buildPlaylist() {
+        playlist = [];
+        trackNames = [];
+        for (var i = 0; i < BUILTIN_TRACKS.length; i++) {
+            playlist.push(BUILTIN_TRACKS[i].file);
+            trackNames.push(BUILTIN_TRACKS[i].name + ' - ' + BUILTIN_TRACKS[i].artist);
+        }
+    }
+    buildPlaylist();
+
+    // ---- LRC parser ----
+    function parseLrc(raw) {
+        var lines = raw.split(/\r?\n/);
+        var result = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].trim();
+            var m = line.match(/\[(\d{1,2}):(\d{2}(?:\.\d{1,3})?)\](.*)/);
+            if (m) {
+                var min = parseInt(m[1], 10);
+                var sec = parseFloat(m[2]);
+                var time = min * 60 + sec;
+                var text = m[3].trim();
+                if (text) result.push({ time: time, text: text });
+            }
+        }
+        result.sort(function (a, b) { return a.time - b.time; });
+        return result;
+    }
+
+    // ---- HTML escape helper ----
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ---- Find lyrics for track index (from pre-parsed map) ----
+    function findLyricsForTrack(index) {
+        if (index < 0 || index >= trackNames.length) return null;
+        var trackName = (trackNames[index] || '').trim();
+        var keys = Object.keys(lyricsMap);
+
+        if (lyricsMap[trackName]) return lyricsMap[trackName];
+        for (var k = 0; k < keys.length; k++) {
+            if (keys[k].toLowerCase() === trackName.toLowerCase()) return lyricsMap[keys[k]];
+        }
+
+        var url = playlist[index] || '';
+        var fileName = url.split('/').pop().split('\\').pop();
+        var baseName = fileName.replace(/\.[^/.]+$/, '').trim();
+        if (baseName && lyricsMap[baseName]) return lyricsMap[baseName];
+        for (var k2 = 0; k2 < keys.length; k2++) {
+            if (keys[k2].toLowerCase() === baseName.toLowerCase()) return lyricsMap[keys[k2]];
+        }
+
+        var normalize = function (s) { return s.replace(/\s+/g, '').toLowerCase(); };
+        var normTrack = normalize(trackName);
+        var normBase = normalize(baseName);
+        for (var k3 = 0; k3 < keys.length; k3++) {
+            var normKey = normalize(keys[k3]);
+            if (normKey === normTrack || normKey === normBase) return lyricsMap[keys[k3]];
+        }
+        return null;
+    }
+
+    // ---- Load lyrics for current track ----
+    function loadLyricsForTrack(index) {
+        var lyrics = findLyricsForTrack(index);
+        if (lyrics && lyrics.length > 0) {
+            currentLyrics = lyrics;
+            currentLyricIndex = -1;
+            renderLyricsAll();
+            lyricsDisplay.classList.add('visible');
+            updateLyrics(audio.currentTime);
+            return;
+        }
+        currentLyrics = null;
+        currentLyricIndex = -1;
+        lyricsDisplay.classList.remove('visible');
+    }
+
+    // ---- Render all lyrics lines into DOM ----
+    function renderLyricsAll() {
+        if (!currentLyrics) return;
+        var html = '';
+        for (var i = 0; i < currentLyrics.length; i++) {
+            html += '<div class="lyric-line" data-index="' + i + '">' + escapeHtml(currentLyrics[i].text) + '</div>';
+        }
+        lyricsScroll.innerHTML = html;
+    }
+
+    // ---- Update active lyric based on currentTime ----
+    function updateLyrics(currentTime) {
+        if (!currentLyrics || currentLyrics.length === 0) return;
+        var newIndex = -1;
+        for (var i = 0; i < currentLyrics.length; i++) {
+            if (currentLyrics[i].time <= currentTime) newIndex = i;
+            else break;
+        }
+        if (newIndex !== currentLyricIndex) {
+            currentLyricIndex = newIndex;
+            scrollLyricsTo(currentLyricIndex);
+        }
+    }
+
+    // ---- Scroll lyrics to given line index ----
+    function scrollLyricsTo(index) {
+        if (index < 0) {
+            lyricsScroll.style.transform = 'translateY(0px)';
+        } else {
+            var offset = index * LYRIC_LINE_HEIGHT + LYRIC_LINE_HEIGHT / 2;
+            lyricsScroll.style.transform = 'translateY(' + (-offset) + 'px)';
+        }
+        // Update styling via DOM query
+        var lines = lyricsScroll.querySelectorAll('.lyric-line');
+        for (var i = 0; i < lines.length; i++) {
+            lines[i].classList.remove('active', 'near');
+            if (i === index) lines[i].classList.add('active');
+            else if (Math.abs(i - index) === 1) lines[i].classList.add('near');
+        }
+    }
+
+    // ---- Load track ----
+    function loadTrack(index) {
+        currentTrack = index;
+        audio.src = playlist[index];
+        titleEl.textContent = trackNames[index];
+        currentTimeEl.textContent = '0:00';
+        totalTimeEl.textContent = '0:00';
+        progressFill.style.width = '0%';
+        progressHandle.style.left = '0%';
+        updatePlaylistUI();
+        loadLyricsForTrack(index);
+    }
+
+    // ---- Play ----
+    function playTrack() {
+        audio.play().then(function () {
+            updatePlayBtn(true);
+        }).catch(function () {
+            // Autoplay blocked — wait for user click
+            updatePlayBtn(false);
+        });
+    }
+
+    function playNext() {
+        loadTrack((currentTrack + 1) % playlist.length);
+        playTrack();
+    }
+
+    function playPrev() {
+        loadTrack((currentTrack - 1 + playlist.length) % playlist.length);
+        playTrack();
+    }
+
+    // ---- Play button UI ----
+    function updatePlayBtn(playing) {
+        if (playing) {
+            playBtn.innerHTML = '&#9646;&#9646;';
+            playBtn.classList.add('playing');
+        } else {
+            playBtn.innerHTML = '&#9654;';
+            playBtn.classList.remove('playing');
+        }
+    }
+
+    // ---- Format time ----
+    function fmtTime(t) {
+        if (isNaN(t) || !isFinite(t)) return '0:00';
+        var m = Math.floor(t / 60);
+        var s = Math.floor(t % 60);
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    // ---- Progress bar (seek) ----
+    function updateProgress() {
+        if (!audio.duration || !isFinite(audio.duration)) return;
+        var pct = (audio.currentTime / audio.duration) * 100;
+        progressFill.style.width = pct + '%';
+        progressHandle.style.left = pct + '%';
+        currentTimeEl.textContent = fmtTime(audio.currentTime);
+    }
+
+    function updateTotalTime() {
+        if (audio.duration && isFinite(audio.duration)) {
+            totalTimeEl.textContent = fmtTime(audio.duration);
+        }
+    }
+
+    // Seek bar interaction
+    (function initSeek() {
+        var dragging = false;
+        function seekFromEvent(e) {
+            var rect = seekBar.getBoundingClientRect();
+            var x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+            var pct = Math.max(0, Math.min(1, x / rect.width));
+            if (audio.duration && isFinite(audio.duration)) {
+                audio.currentTime = pct * audio.duration;
+            }
+            progressFill.style.width = (pct * 100) + '%';
+            progressHandle.style.left = (pct * 100) + '%';
+        }
+        seekBar.addEventListener('mousedown', function (e) {
+            dragging = true;
+            seekFromEvent(e);
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', function (e) {
+            if (dragging) { seekFromEvent(e); e.preventDefault(); }
+        });
+        document.addEventListener('mouseup', function () { dragging = false; });
+        seekBar.addEventListener('touchstart', function (e) {
+            dragging = true;
+            seekFromEvent(e);
+            e.preventDefault();
+        });
+        document.addEventListener('touchmove', function (e) {
+            if (dragging) { seekFromEvent(e); e.preventDefault(); }
+        });
+        document.addEventListener('touchend', function () { dragging = false; });
+    })();
+
+    // ---- Volume slider (custom div, no input range — CEF incompatible) ----
+    function updateVolUI(vol) {
+        var pct = vol * 100;
+        volFill.style.width = pct + '%';
+        volHandle.style.left = pct + '%';
+    }
+    updateVolUI(TARGET_VOLUME);
+
+    (function initVolume() {
+        var dragging = false;
+        function setVolFromEvent(e) {
+            var rect = volTrack.getBoundingClientRect();
+            var x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+            var pct = Math.max(0, Math.min(1, x / rect.width));
+            TARGET_VOLUME = pct;
+            audio.volume = pct;
+            updateVolUI(pct);
+        }
+        volTrack.addEventListener('mousedown', function (e) {
+            dragging = true;
+            setVolFromEvent(e);
+            e.preventDefault();
+            e.stopPropagation();
+        });
+        document.addEventListener('mousemove', function (e) {
+            if (dragging) { setVolFromEvent(e); e.preventDefault(); }
+        });
+        document.addEventListener('mouseup', function () { dragging = false; });
+        volTrack.addEventListener('touchstart', function (e) {
+            dragging = true;
+            setVolFromEvent(e);
+            e.preventDefault();
+            e.stopPropagation();
+        });
+    })();
+
+    // ---- Playlist UI ----
+    function updatePlaylistUI() {
+        var html = '';
+        for (var i = 0; i < playlist.length; i++) {
+            var cls = (i === currentTrack) ? 'mc-pl-item active' : 'mc-pl-item';
+            html += '<li class="' + cls + '" data-idx="' + i + '">';
+            html += '<span class="mc-pl-indicator"></span>';
+            html += '<span class="mc-pl-name">' + trackNames[i].replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
+            if (i >= BUILTIN_TRACKS.length) {
+                html += '<span class="mc-pl-badge">本地</span>';
+                html += '<button class="mc-pl-remove" data-idx="' + i + '">&#10005;</button>';
+            }
+            html += '</li>';
+        }
+        playlistEl.innerHTML = html;
+
+        // Click to play
+        var items = playlistEl.querySelectorAll('.mc-pl-item');
+        for (var j = 0; j < items.length; j++) {
+            items[j].addEventListener('click', function (e) {
+                if (e.target.classList.contains('mc-pl-remove')) return;
+                var idx = parseInt(this.getAttribute('data-idx'), 10);
+                loadTrack(idx);
+                playTrack();
+            });
+        }
+
+        // Remove button
+        var removes = playlistEl.querySelectorAll('.mc-pl-remove');
+        for (var k = 0; k < removes.length; k++) {
+            removes[k].addEventListener('click', function (e) {
+                e.stopPropagation();
+                var idx = parseInt(this.getAttribute('data-idx'), 10);
+                removeTrack(idx);
+            });
+        }
+    }
+
+    function removeTrack(index) {
+        if (index < BUILTIN_TRACKS.length) return; // Cannot remove built-in
+        playlist.splice(index, 1);
+        trackNames.splice(index, 1);
+        if (currentTrack >= playlist.length) currentTrack = playlist.length - 1;
+        if (currentTrack < 0) currentTrack = 0;
+        loadTrack(currentTrack);
+        playTrack();
+    }
+
+    // ---- Volume panel toggle ----
+    volToggle.addEventListener('click', function (e) {
+        e.stopPropagation();
+        mcPanel.classList.toggle('vol-expanded');
+    });
+
+    // ---- Playlist panel toggle ----
+    playlistToggle.addEventListener('click', function (e) {
+        e.stopPropagation();
+        mcPanel.classList.toggle('expanded');
+        updatePlaylistUI();
+    });
+
+    // ---- Add local music ----
+    addBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', function () {
+        var files = fileInput.files;
+        if (!files || files.length === 0) return;
+        var added = 0;
+        for (var i = 0; i < files.length; i++) {
+            (function (file) {
+                if (/\.(mp3|wav|ogg|flac|m4a|aac)$/i.test(file.name)) {
+                    var url = URL.createObjectURL(file);
+                    playlist.push(url);
+                    trackNames.push(file.name.replace(/\.[^.]+$/, ''));
+                    added++;
+                }
+            })(files[i]);
+        }
+        if (added > 0) {
+            updatePlaylistUI();
+            // Auto-play first new track if nothing was playing
+            if (audio.paused && playlist.length > BUILTIN_TRACKS.length) {
+                loadTrack(BUILTIN_TRACKS.length);
+                playTrack();
+            }
+        }
+        fileInput.value = '';
+    });
+
+    // ---- Button handlers ----
+    playBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (audio.paused) {
+            playTrack();
+        } else {
+            audio.pause();
+            updatePlayBtn(false);
+        }
+    });
+
+    prevBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        playPrev();
+    });
+
+    nextBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        playNext();
+    });
+
+    // ---- Audio events ----
+    audio.addEventListener('timeupdate', function () {
+        updateProgress();
+        updateLyrics(audio.currentTime);
+    });
+
+    audio.addEventListener('loadedmetadata', updateTotalTime);
+    audio.addEventListener('durationchange', updateTotalTime);
+
+    audio.addEventListener('play', function () {
+        updatePlayBtn(true);
+    });
+
+    audio.addEventListener('pause', function () {
+        updatePlayBtn(false);
+    });
+
+    audio.addEventListener('ended', function () {
+        playNext();
+    });
+
+    audio.addEventListener('error', function () {
+        titleEl.textContent = '(加载失败) ' + trackNames[currentTrack];
+        updatePlayBtn(false);
+    });
+
+    // ---- INIT: dead simple, no AudioContext tricks ----
+    function initAudio() {
+        loadTrack(0);
+        updatePlaylistUI();
+        playTrack();
+    }
+
+    // ---- User interaction fallback (if CEF blocks autoplay) ----
+    var interactionDone = false;
+    function onFirstClick() {
+        if (interactionDone) return;
+        if (audio.paused) {
+            playTrack();
+        }
+        interactionDone = true;
+    }
+    document.addEventListener('click', onFirstClick);
+    document.addEventListener('touchstart', onFirstClick);
+    // Remove listeners after first successful play
+    audio.addEventListener('play', function () {
+        if (!interactionDone) interactionDone = true;
+        document.removeEventListener('click', onFirstClick);
+        document.removeEventListener('touchstart', onFirstClick);
+    });
+
+    // Start
+    initAudio();
+})();
+</script>
+
+</body>
+</html>
